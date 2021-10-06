@@ -1,0 +1,1 @@
+The report for this homework is faulty, as it was reported on a wrong selection of housing dataset columns (only first two).
