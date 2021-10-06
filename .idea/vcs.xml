@@ -2,5 +2,10 @@
 <project version="4">
   <component name="VcsDirectoryMappings">
     <mapping directory="$PROJECT_DIR$" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/hw1/MLDS-homeworks" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/hw2" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/hw4/mlds-hw4" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/hw5" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/hw5/Santorini-AI" vcs="Git" />
   </component>
 </project>
