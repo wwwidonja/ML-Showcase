@@ -1,0 +1,16 @@
+,Method,Accuracy
+0,Baseline,34.0
+1,Baseline,52.0
+2,Baseline,36.0
+3,Baseline,36.0
+4,Baseline,57.99999999999999
+5,Multinomial LR,56.00000000000001
+6,Multinomial LR,52.0
+7,Multinomial LR,42.0
+8,Multinomial LR,42.0
+9,Multinomial LR,57.99999999999999
+10,Ordinal LR,50.0
+11,Ordinal LR,56.00000000000001
+12,Ordinal LR,46.0
+13,Ordinal LR,48.0
+14,Ordinal LR,62.0
