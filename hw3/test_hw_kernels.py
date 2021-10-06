@@ -65,9 +65,9 @@ class HW4Tests(unittest.TestCase):
         for kernel in [Linear(), Polynomial(M=3), RBF(sigma=0.2)]:
             number = kernel(self.X[0], self.X[1]) # k
             float(number)  # should not crash
-            a1d = kernel(self.X, self.X[0])
-            self.assertTrue(len(a1d.shape) == 1)
             a1d = kernel(self.X[0], self.X)  # a vector of k
+            self.assertTrue(len(a1d.shape) == 1)
+            a1d = kernel(self.X, self.X[0])
             self.assertTrue(len(a1d.shape) == 1)
             a2d = kernel(self.X, self.X)  # the K matrix
             self.assertTrue(len(a2d.shape) == 2)

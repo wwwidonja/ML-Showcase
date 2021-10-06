@@ -3,7 +3,7 @@ import pandas as pd #used only for reading
 from sklearn.preprocessing import StandardScaler #Used only to scale data
 import seaborn as sns #used only to get prettier plots :)
 from matplotlib import pyplot as plt
-
+import inspect
 plt.style.use('seaborn-deep')
 from matplotlib import rcParams
 
@@ -14,23 +14,29 @@ from sklearn.metrics import mean_squared_error #used for internavl CV
 
 class Predictor:
 
-    def __init__(self, alpha, X, kernel):
+    def __init__(self, X, kernel):
         self.kernel = kernel
-        self.alpha = alpha
         self.X = X
+        self.alpha, self.b = None, None
+        self.a_alpha = None
+        self.support_vectors = None
+        pass
 
     def predict(self, Xprime):
         kx = self.kernel(Xprime, self.X)
-        return np.dot(kx, self.alpha)
+        return (np.dot(self.alpha, kx.T) + self.b).squeeze()
 
 
-class KernelizedRidgeRegression:
-    def __init__(self, kernel, lambda_):
-        self.lambda_ = lambda_
-        self.kernel = kernel
+class SVR:
+    def __init__(self, kernel, lambda_, epsilon):
+        self.lambda_, self.kernel, self.epsilon = lambda_, kernel, epsilon
+        self.z = np.array([[1, -1], [-1, 1]])
+
 
     def fit(self, X, Y):
-        self.X = X
+        self.X, self.Y = X, Y
+        predictor = Predictor(S, self.kernel)
+        C = (1/self.lambda_)
         K = np.array(self.kernel(X, X))
         alpha = np.dot(np.linalg.inv(K + np.dot(self.lambda_, np.identity(len(X)))), Y)
         self.Y = Y
@@ -79,13 +85,12 @@ def cross_validation(Xstar, Y):
     poly_rmse = []
     xstars = np.array_split(Xstar, 5)
     ys = np.array_split(Y, 5)
-    for M in range(1, 5):
+    for M in range(1, 11):
         curr_best_lambda = 0
         best_score = np.inf
         for l in np.arange(0.05, 10, 0.05):
-            rmses = []
             for j in range(5):
-
+                rmses = []
                 trainXstar, trainY = np.array([x for i, x in enumerate(xstars) if i != j][0]), np.array(
                     [x for i, x in enumerate(ys) if i != j][0])
                 testXstar, testY = xstars[j], ys[j]
@@ -101,12 +106,12 @@ def cross_validation(Xstar, Y):
         best_lambda.append(curr_best_lambda)
     rbf_rmse = []
     best_lambda_rbf = []
-    for sigma in np.arange(5, 10.5, 0.5):
+    for sigma in np.arange(1.5, 10, 0.5):
         curr_best_lambda = 0
         best_score = np.inf
         for l in np.arange(0.05, 10, 0.05):
-            rmses = []
             for j in range(5):
+                rmses = []
                 trainXstar, trainY = np.array([x for i, x in enumerate(xstars) if i != j][0]), np.array(
                     [x for i, x in enumerate(ys) if i != j][0])
                 testXstar, testY = xstars[j], ys[j]
@@ -134,7 +139,7 @@ def rmse_M(Xstar, Y):
     #UNCOMMENT HERE IF YOU WANT TO SEE THE VALUES OF LAMBDAS, PRESENTED IN THE REPORT.
     print(f'lambdas1 = {lambdas1}')
     print(f'lambdas2 = {lambdas2}')
-    for M in range(1, 5):
+    for M in range(1, 11):
         krr = KernelizedRidgeRegression(Polynomial(M), 1).fit(trainXstar, trainY)
         krr_best = KernelizedRidgeRegression(Polynomial(M), lambdas1[M - 1]).fit(trainXstar, trainY)
         ypred = krr.predict(testXstar)
@@ -142,8 +147,8 @@ def rmse_M(Xstar, Y):
         poly_rmse.append(mean_squared_error(ypred, testY, squared=False))
         poly_rmse_best.append(mean_squared_error(ypred_best, testY, squared=False))
 
-    sns.lineplot(x=range(1, 5), y=poly_rmse, ax=ax[0], label=r'$\lambda=1$')
-    sns.lineplot(x=range(1, 5), y=poly_rmse_best, ax=ax[0], label=r'best $\lambda$')
+    sns.lineplot(x=range(1, 11), y=poly_rmse, ax=ax[0], label=r'$\lambda=1$')
+    sns.lineplot(x=range(1, 11), y=poly_rmse_best, ax=ax[0], label=r'best $\lambda$')
     ax[0].set_xlabel('M value', )
     ax[0].set_ylabel('RMSE', )
     ax[0].set_title('Polynomial kernel', )
@@ -151,7 +156,7 @@ def rmse_M(Xstar, Y):
     rbf_rmse = []
     rbf_rmse_best = []
     count = 0
-    for sigma in np.arange(5, 10.5, 0.5):
+    for sigma in np.arange(1.5, 10, 0.5):
         krr = KernelizedRidgeRegression(RBF(sigma), 1).fit(trainXstar, trainY)
         krr_best = KernelizedRidgeRegression(RBF(sigma), lambdas2[count]).fit(trainXstar, trainY)
         count += 1
@@ -159,8 +164,8 @@ def rmse_M(Xstar, Y):
         ypred2_best = krr_best.predict(testXstar)
         rbf_rmse.append(mean_squared_error(ypred2, testY, squared=False))
         rbf_rmse_best.append(mean_squared_error(ypred2_best, testY, squared=False))
-    df = pd.DataFrame({'x': rbf_rmse, 'y': np.arange(5, 10.5, 0.5)})
-    df2 = pd.DataFrame({'x': rbf_rmse_best, 'y': np.arange(5, 10.5, 0.5)})
+    df = pd.DataFrame({'x': rbf_rmse, 'y': np.arange(1.5, 10, 0.5)})
+    df2 = pd.DataFrame({'x': rbf_rmse_best, 'y': np.arange(1.5, 10, 0.5)})
     df.y = df.y.astype('category')
     df2.y = df2.y.astype('category')
     sns.lineplot(x='y', y='x', data=df, ax=ax[1], label=r'$\lambda=1$')
@@ -200,8 +205,8 @@ if __name__ == '__main__':
     sine()
     housing = pd.read_csv('data/housing2r.csv')
     h = np.array(housing)
-    X = np.array(h[:, :5])
+    X = np.array([h[:, 0]]).T
     scaler = StandardScaler().fit(X)
     Xstar = scaler.transform(X)
-    Y = np.array([h[:, 5]]).T
+    Y = np.array([h[:, 1]]).T
     rmse_M(Xstar, Y)
