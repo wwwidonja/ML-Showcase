@@ -2,6 +2,8 @@
 This is the private repository of Machine Learning for Data Science homeworks.
 All work is my own.
 
+It is advised to look at individual .pdf reports in each folder for better understanding of the provided code.
+
 
 # Contents:
 ## HW1: Trees
