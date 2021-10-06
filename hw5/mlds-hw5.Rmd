@@ -1,0 +1,676 @@
+---
+title: "Machine Learning for Data Science: Homework #5\nLoss Estimation"
+author: "Vid Stropnik"
+date: "5/3/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.width=6, fig.height=5)
+library(ggplot2)
+library(scales)
+library(gridExtra)
+library(grid)
+library(lattice)
+```
+
+## Setup
+First, let's define the generator for our data, as shown in the Homework instructions. We can note that features *x.6* - *x.8* have no effect on our target variable ***y***. Let's also define the *log_loss* function, as seen in the instructions.
+```{r toy}
+toy_data <- function(n, seed = NULL) {
+set.seed(seed)
+x <- matrix(rnorm(8 * n), ncol = 8)
+z <- 0.4 * x[,1] - 0.5 * x[,2] + 1.75 * x[,3] - 0.2 * x[,4] + x[,5]
+y <- runif(n) > 1 / (1 + exp(-z))
+return (data.frame(x = x, y = y))
+}
+log_loss <- function(y, p) {
+-(y * log(p) + (1 - y) * log(1 - p))
+}
+```
+
+Finally, let us also generate a proxy of all true data, which we will later use to compute the proxy of true risk.
+```{r gt}
+df_dgp <- toy_data(100000, 0)
+```
+
+# General Idea
+Throughout this homework, we will investigate how different empirical estimates of the model risk differ from the true risk, as represented by the true risk proxy. To do so, we will use a Logistic Regression model, fit on data points from the same data generating process as the huge dataset, created above.
+
+For logistic regression, we use a **binomial** family *generalized linear model (glm)* in R. We estimate the risk using the expected value of loss between the model's prediction and the ground truth.
+
+To generate our True Risk proxy, we compute the expected loss of the predictions on the huge dataset above. 
+
+The details of different empirical model risks are given throughout the following sections.
+
+To avoid redundancy, assume the following code to mean the estimation of a model's risk (in this case, true risk using the ***df_dgp*** dataset) for the remainder of this report:
+
+```{r}
+set.seed(0)
+t0 <- toy_data(50)
+model<- glm( y ~ ., data = t0, family = binomial)
+prediction <- predict(model, newdata=df_dgp, type= "response")
+gt <- df_dgp$y
+trp <- mean(log_loss(gt, prediction))
+sprintf("True risk proxy of h; R(h) = %.4f", trp)
+```
+Finally, let's introduce some more principles that repeat often in this report. When computing the estimated risk, the standard error of the estimation is achieved as follows:
+```{r}
+se <- function(x) {
+  return (sd(x) / sqrt(length(x)))
+}
+std_error <- se(log_loss(gt, prediction))
+sprintf("Standard error of True risk proxy is: %.4f", std_error)
+```
+It is worth noting that the true risk's standard error is of the order *1e-3*. **This is is also how we know that reporting our results with three decimal places is sufficient to generalize to the true risk.** 
+
+Finally, by the [68-95-99.7 rule of statistics](https://en.wikipedia.org/wiki/68%E2%80%9395%E2%80%9399.7_rule#cite_note-2), and the central limit theorem, we know that under the assumption of independent and identically distributed variables (which we have here), a 95% confidence interval is equivalent to 1.96 standard errors in both directions from the mean of the distribution. Consequently, the following function computes if a given value is inside the 95 percent confidence interval of a distribution:
+
+```{r}
+inci95 <- function(samps, x) {
+  m <- mean(samps)
+  err <- se(samps)
+  lower <- m - 1.96 * err
+  upper <- m + 1.96 * err
+  return (lower <= x & x <= upper)
+}
+```
+Throughout this homework, we will be interested exclusively in whether the true risk proxy can be found inside the 95% confidence interval.
+
+
+# Holdout Estimation
+We train our model on 50 samples from the same data generating process as we used to estimate our true risk proxy, then assess the empirical risk on an independent group of 50 different samples. Due to these samples being completely withheld from the learning process, we call this method *Holdout estimation*.
+
+```{r, echo=FALSE}
+
+results <-c()
+rs <- c()
+ses <- c()
+set.seed(0)
+for (seed in c(1:1000)){
+  tX <- toy_data(50)
+  prediction <- predict(model, newdata=tX, type= "response")
+  gt <- tX$y
+  ll <- log_loss(gt, prediction)
+  r <- mean(ll)
+  err <- se(ll)
+  true_risk_in_95 <- inci95(ll, trp)
+  results <- append(results, true_risk_in_95)
+  ses <- append(ses, err)
+  rs <- append(rs, r)
+}
+
+```
+
+To get some more reliable results, we run this example 1000 times. The following plot shows the differences between the empirical estimation of risk and the true risk proxy. Some key information is reported below;
+
+```{r holdout, echo=FALSE}
+serr <- median(ses)
+diffs <- rs - trp
+df <- data.frame(diffs)
+md <- mean(rs - trp)
+ggplot(df, aes(x=diffs)) + geom_density() + ggtitle("Density of Difference
+Holdout Estimation - variability due to test data variability") + theme_bw() + xlab('Diff of empirical and true risk') + geom_vline(aes(xintercept=0, color="Equality"), color="black", alpha=0.2) + geom_vline(aes(xintercept=0-1.96*serr, color='95% CI'), linetype = "longdash", alpha=0.6) + geom_vline(xintercept=0+1.96*serr, linetype = "longdash", color='red', alpha=0.3) + geom_vline(aes(xintercept=md, color='Mean difference'), linetype="longdash", alpha=0.8)
+```
+```{r echo=FALSE}
+md <- mean(rs - trp)
+sprintf("True risk proxy: %.3f", trp)
+sprintf("Mean difference between Empirical and True Risk (bias): %.3f", md)
+```
+
+```{r echo=FALSE}
+fiftyfifty  <- mean(log_loss(df_dgp$y, 0.5))
+sprintf("True risk of 0.5-0.5 predictions: %.3f", fiftyfifty)
+```
+```{r echo=FALSE}
+sprintf("Median standard error: %.3f", median(ses))
+p <- sum(results)/length(results)
+sprintf("Frequency of True Risk in 95%% CI: %.1f%%", p*100)
+```
+
+
+We can notice that the bias of our model is distributed around 0, with a slight skewedness to the left. We see that the mean empirical risk is very close to the true risk (the mean difference is of the same size order as the standard error of the true risk)! We conclude that Holdout estimation is unbiased. Finally, we can see that the risk of the 50-50 estimator falls outside our the naively constructed 68% confidence interval that can be achieved by observing a one standard error deviation to each side of the estimated bias. This establishes that our model outperforms a naive classifier most of the time.
+
+Finally, we observe that the true risk lies in the 95% Confidence interval slightly less often than expected. We can assume that this is due to our CI construction process assuming a normal distribution and thus being slightly naive in the context of having a relatively small amount of available data to learn from. 
+
+All in all, we can state that for practical use, holdout estimation is a really good and stable method for model risk estimation and should be used when applicable.
+
+***Effect of changing parameters***
+Should we increase the size of the *training set*, the value of all computed risks (incl. the true risk proxy) would decrease due to a better understanding of the underlying data generating process. Intuitively, this should produce a smoother distribution closer to the bell curve. With this, of course, come the shrinking of the confidence interval and bias. Conversely, should the size of the training set decrease, the resulting risks and standard errors would increase.
+
+
+Increasing the *test set* would not effect the true risk proxy; however, our estimator would generally be more robust towards random noise in the test data, which should again, smooth out the distribution plot.
+
+Should we reduce the size of the test set, the produced estimator might overestimate the model's performance, as cases where the learner might fail are less likely to be detected. 
+
+# Overestimation of the Deployed Model's risk
+In this section, we demonstrate why it is important to always deploy a model using all available data for learning. We generate two toy datasets of equal size. We can assume that one was used for training and the other for testing in the Holdout estimation step, as described in the preceding section. Here, we demonstrate the difference in true risk between one model, trained only on the **training** data in said scenario, while the other is fit on both.
+
+For better understanding, consider the following code:
+```{r warning=FALSE}
+risk_only_train <- c()
+risk_full <- c()
+for (s in c(1:50)){
+  train <- toy_data(50,)
+  test <- toy_data(50,)
+  t_both <- rbind(train, test)
+  h_only_train <- glm( y ~ ., data = train, family = binomial)
+  h_both <- glm( y ~ ., data = t_both, family = binomial)
+  pred_train <- predict(h_only_train, newdata=df_dgp, type="response")
+  pred_both <- predict(h_both, newdata=df_dgp, type="response")
+  trp_only_train <- mean(log_loss(df_dgp$y, pred_train))
+  trp_both <- mean(log_loss(df_dgp$y, pred_both))
+  risk_only_train <- c(risk_only_train, trp_only_train)
+  risk_full <- c(risk_full, trp_both)
+}
+summary(risk_only_train - risk_full)
+
+```
+
+Here, we show that, in expectation, the risk of a model trained on less data is greater than that of the one, trained on more. However, we can see that our expectation estimator (the mean) is skewed by the extreme values, as the two estimators converge in a majority of test runs. This means that, by relying on expectation, there is always a probabilistic chance that we might be overestimating our model's risk due to random noise in our training data. Thus, the bigger the amount of training data (and our model's understanding of the underlying DGP), the better. Consequently, after estimating our model's risk, **all** data should be used in deployment.
+
+***Effect of changing parameters***
+By incresing the amount of samples, the mean difference between the models should get progressively smaller, while reducing it should greatly reduce consistency, vastly incresing the absolute values of the min and max samples differences. We would expect that the median value would remain close to 0 in both cases, given that the underlying DGP remains the same.
+
+
+# Loss estimator variability due to split variability
+
+In this section, we explore how split variability might affect our estimator's performance. Given only 100 samples from the underlying DGP, we split our data into two equally sized partitions (for training and evaluation). Below, we show the distribtion of differences between the empirically estimated risk and the true risk over 1000 different splits;
+
+```{r, echo=FALSE}
+t100 <- toy_data(100, 0)
+h0<- glm( y ~ ., data = t100, family = binomial)
+prediction <- predict(model, newdata=df_dgp, type= "response")
+gt <- as.numeric(df_dgp$y)
+trp <- mean(log_loss(gt, prediction))
+```
+
+```{r warning = FALSE, echo=FALSE}
+rs <- c()
+inci <- c()
+ses <- c()
+for (seed in c(1:1000)){
+  smp <- sample(100,50)
+  train <- t100[smp,]
+  test <- t100[-smp,]
+  h<- glm( y ~ ., data = train, family = binomial)
+  pred <- predict(h, newdata=test, type= "response")
+  gt <- test$y
+  ll <- log_loss(gt, pred)
+  r <- mean(ll)
+  err <- se(ll)
+  ses <- c(ses, err)
+  true_risk_in_95 <- inci95(ll, trp)
+  inci <- c(inci, true_risk_in_95)
+  rs <- c(rs, r)
+}
+diffs <- rs - trp
+md <- mean(diffs)
+serr <- median(ses)
+df <- data.frame(diffs)
+ggplot(df, aes(x=diffs)) + geom_density() + ggtitle("Density of Difference
+Holdout estimation - Split variability") + theme_bw() + xlab('Diff of empirical and true risk') + geom_vline(aes(xintercept=0, color="Equality"), linetype = "longdash", color="black") + geom_vline(aes(xintercept=0-1.96*serr, color='95% CI'), linetype = "longdash", alpha=0.6) + geom_vline(xintercept=0+1.96*serr, linetype = "longdash", color='red', alpha=0.3) + geom_vline(aes(xintercept=md, color='Mean difference'), linetype="longdash", alpha=0.8) + xlim(-0.3, 1.5)
+```
+
+
+```{r echo=FALSE}
+sprintf("True risk proxy of h0; R(h) = %.3f", trp)
+sprintf('Average diff between empirical and true risk (bias): %.3f', mean(diffs))
+sprintf('Median standard error: %.3f', median(ses))
+p <- sum(as.numeric(inci))/length(inci)
+sprintf("Frequency of True Risk in 95%% CI: %.1f%%", p*100)
+```
+
+We've already established that the true risk is overestimated when omitting a certain amount of available datapoints from the learning process. Here, however, we can see that a random split might really heavily influence the amount by which we overestimate our risk. Notice that in approximately one out of ten cases, the true risk isn't even in the median confidence interval.
+
+From this, we can conclude that several passes of the train-test split should be performed to get more stable results, such as the approaches shown in the Cross Validation section that follows.
+
+***Effect of changing parameters***
+Even though we're currently over-estimating the model's risk, we can see that the mode of the shown distribution is to the left of 0. Hence, should we increase the dataset and remain with the same split proportion, we can expect this sort of estimation to actually slightly underestimate the model's risk, as the proportion of extreme values gets smaller with the larger dataset.
+
+Conversely, these inherent overestimations will represent a larger proportion in a smaller set, thus resulting in the overestimation of risk by the empiric model.
+
+By incresing the proportion of training samples would allow our model to gain more understanding of the underlying data generating process, thus lowering the bias. This is why, in practice, we often use something more similar to a 70-30 or a 80-20 split.
+
+
+## Cross Validation
+Finally, let's see how all of our results so far fare in the context of k-fold cross validation.
+
+A model is trained on 100 samples of the now very well known data generating process. Below, we show the results for 5 different cross-validation scenarios, all of which are carried out on new, shuffled data samples over 500 iterations:
+
+
+-2-fold cross validation without repetitions,
+
+-4-fold cross validation without repetitions,
+
+-10-fold cross validation without repetitions,
+
+-10-fold cross validation with 20 repetitions,
+
+-Leave-one-out cross validation (LOOCV) without repetitions.
+
+```{r, warning = FALSE, echo=FALSE}
+
+make_df <- function() { data.frame(risk=as.numeric(),
+                                   diff=as.numeric(),
+                                   error=as.numeric(),
+                                   ci=as.numeric(),
+                                   stringsAsFactors = F)
+}
+cv2 <- make_df()
+cv4 <- make_df()
+loocv <- make_df()
+cv10 <- make_df()
+cv10rep <- make_df()
+trps <- c()
+
+
+for (rep in c(1:500)){
+
+  toy <- toy_data(100)
+  h0<- glm( y ~ ., data = toy, family = binomial)
+  pred <- predict(h0, newdata=df_dgp, type= "response")
+  gt <- df_dgp$y
+  trp <- mean(log_loss(gt, pred))
+  trps<-append(trps, trp)
+  
+  ##2-fold
+  
+  shuffled_toy <- toy[sample(nrow(toy)),]
+  splits <- split(shuffled_toy, c(1:2))
+  loss <- c()
+  for (i in c(1:2)){
+    test <- data.frame(splits[i])
+    names(test) <- names(toy)
+    train <- data.frame(splits[-i])
+    names(train) <- names(toy)
+    h <- glm( y ~ ., data = train, family = binomial)
+    pred <- predict(h, newdata=test, type='response')
+    gt <- test$y
+    loss <- append(loss, log_loss(gt, pred))
+  }
+  row <- c()
+  row$risk <- mean(loss)
+  row$diff <- row$risk - trp
+  row$error <- se(loss)
+  row$ci <- inci95(loss, trp)
+  cv2 <- rbind(cv2, row)
+  
+  ###LOOCV
+  shuffled_toy <- toy[sample(nrow(toy)),]
+  splits <- split(shuffled_toy, c(1:length(shuffled_toy)))
+  loss <- c()
+  for (i in c(1:length(shuffled_toy))){
+    test <- data.frame(splits[i])
+    names(test) <- names(toy)
+    train <- make_df()
+    for (df in splits[-i]){
+      df <- data.frame(df)
+      names(df) <- names(toy)
+      train <- rbind(train, df)
+    }
+    h <- glm( y ~ ., data = train, family = binomial)
+    pred <- predict(h, newdata=test, type='response')
+    gt <- test$y
+    loss <- append(loss, log_loss(gt, pred))
+  }
+  row <- c()
+  row$risk <- mean(loss)
+  row$diff <- row$risk - trp
+  row$error <- se(loss)
+  row$ci <- inci95(loss, trp)
+  loocv <- rbind(loocv, row)
+  
+  ### 4-fold CV
+  shuffled_toy <- toy[sample(nrow(toy)),]
+  splits <- split(shuffled_toy, c(1:4))
+  loss <- c()
+  for (i in c(1:4)){
+    test <- data.frame(splits[i])
+    names(test) <- names(toy)
+    train <- make_df()
+    for (df in splits[-i]){
+      df <- data.frame(df)
+      names(df) <- names(toy)
+      train <- rbind(train, df)
+    }
+    h <- glm( y ~ ., data = train, family = binomial)
+    pred <- predict(h, newdata=test, type='response')
+    gt <- test$y
+    loss <- append(loss, log_loss(gt, pred))
+  }
+  row <- c()
+  row$risk <- mean(loss)
+  row$diff <- row$risk - trp
+  row$error <- se(loss)
+  row$ci <- inci95(loss, trp)
+  cv4 <- rbind(cv4, row)
+  
+  ### 10-fold CV
+  shuffled_toy <- toy[sample(nrow(toy)),]
+  splits <- split(shuffled_toy, c(1:10))
+  loss <- c()
+  for (i in c(1:10)){
+    test <- data.frame(splits[i])
+    names(test) <- names(toy)
+    train <- make_df()
+    for (df in splits[-i]){
+      df <- data.frame(df)
+      names(df) <- names(toy)
+      train <- rbind(train, df)
+    }
+    h <- glm( y ~ ., data = train, family = binomial)
+    pred <- predict(h, newdata=test, type='response')
+    gt <- test$y
+    loss <- append(loss, log_loss(gt, pred))
+  }
+  row <- c()
+  row$risk <- mean(loss)
+  row$diff <- row$risk - trp
+  row$error <- se(loss)
+  row$ci <- inci95(loss, trp)
+  cv10 <- rbind(cv10, row)
+  
+  ### 10-fold CV with 20 repetitions
+  
+  overall_temp <- make_df()
+  for (repetition in c(1:20)){
+    shuffled_toy <- toy[sample(nrow(toy)),]
+    repetition_temp <- make_df()
+    splits <- split(shuffled_toy, c(1:10))
+    loss <- c()
+    for (i in c(1:10)){
+      row <- c()
+      test <- data.frame(splits[i])
+      names(test) <- names(toy)
+      train <- make_df()
+      for (df in splits[-i]){
+        df <- data.frame(df)
+        names(df) <- names(toy)
+        train <- rbind(train, df)
+      }
+      h <- glm( y ~ ., data = train, family = binomial)
+      pred <- predict(h, newdata=test, type='response')
+      gt <- test$y
+      loss <- append(loss, log_loss(gt, pred))
+    }
+    row <- c()
+    row$risk <- mean(loss)
+    row$diff <- row$risk - trp
+    row$error <- se(loss)
+    row$ci <- inci95(loss, trp)
+    overall_temp <- rbind(overall_temp, row)
+  }
+  row <- c()
+  row$risk <- mean(overall_temp$risk)
+  row$diff <- mean(overall_temp$diff)
+  row$error <- mean(overall_temp$error)
+  row$ci <- mean(overall_temp$ci)
+  cv10rep <- rbind(cv10rep, row)
+  
+}
+```
+
+```{r warning = FALSE, echo=FALSE}
+ plot1 <- ggplot(cv2, aes(x=diff)) + geom_density() + ggtitle("2 folds") + xlim(-0.4, 0.6) + theme_bw() + xlab('Diff of empirical and true risk')
+ plot2 <- ggplot(cv4, aes(x=diff)) + geom_density() + ggtitle("4 folds") + xlim(-0.4, 0.6) + theme_bw()+ xlab('Diff of empirical and true risk')
+ plot3 <- ggplot(cv10, aes(x=diff)) + geom_density() + ggtitle("10 folds") + xlim(-0.4, 0.6) + theme_bw()+ xlab('Diff of empirical and true risk')
+ plot4<- ggplot(cv10rep, aes(x=diff)) + geom_density() + ggtitle("10 folds, 20 reps") + theme_bw() + xlim(-0.4, 0.6) + xlab('Diff of empirical and true risk')
+ plot5 <- ggplot(loocv, aes(x=diff)) + geom_density() + ggtitle("loocv") + xlim(-0.4,0.6) + theme_bw()+ xlab('Diff of empirical and true risk')
+ grid.arrange(plot1, plot2, plot3, plot4, plot5, ncol=2)
+
+
+```
+
+```{r warning = FALSE, echo = FALSE}
+sprintf("Mean true risk proxy: %.3f", mean(trps))
+sprintf("***MEAN DIFFERENCES - BIAS***")
+sprintf("2-fold: %.3f", mean(cv2$diff))
+sprintf("4-fold: %.3f", mean(cv4$diff))
+sprintf("10-fold: %.3f", mean(cv10$diff))
+sprintf("10-fold, 20 reps: %.3f", mean(cv10rep$diff))
+sprintf("LOOCV: %.3f", mean(loocv$diff))
+sprintf("***MEDIAN STANDARD ERRORS***")
+sprintf("2-fold: %.3f", median(cv2$error))
+sprintf("4-fold: %.3f", median(cv4$error))
+sprintf("10-fold: %.3f", median(cv10$error))
+sprintf("10-fold, 20 reps: %.3f", median(cv10rep$error))
+sprintf("LOOCV: %.3f", median(loocv$error))
+sprintf("***Proportion of time in 95CI***")
+p <- function(inci){
+  return(sum(as.numeric(inci))/length(inci)*100)
+}
+sprintf("2-fold: %.1f%%", p(cv2$ci))
+sprintf("4-fold: %.1f%%", p(cv4$ci))
+sprintf("10-fold: %.1f%%", p(cv10$ci))
+sprintf("10-fold, 20 reps: %.1f%%", p(cv10rep$ci))
+sprintf("LOOCV: %.1f%%", p(loocv$ci))
+```
+
+In this example, we can clearly observe the Law of Large numbers at work, as the differences are getting closer to their expected value (0) as a larger number of trials is performed. From this, we can conclude that a larger number of folds is preferable, if computationally applicable and sensible for the problem at hand.
+
+As we've already established, Cross validation over-estimates the model performance (under-estimates it's risk). We can see that, as the number of folds increases, this over-estimation gets gradually less extreme, partially due to the conclusion above, as well as a better understanding of the underlying DGP when fitting the model (more training samples in each pass).
+
+It makes sense, then, that LOOCV performs well in this regard, as it's mode most closely coincides with the true risk proxy (diff=0). Thus, should we want a reliable estimate of our model's risk, LOOCV should always be considered first.
+
+When we compare the 10-fold cross validation without repetitions, and the one with 20, we can see that the performance of the two estimators is quite similar. It is notable, though, that the results of the 20-repetitions model converge towards those of the Leave-one-out cross validation. We conclude that several passes of a high k-fold cross validation technique is equivalent to LOOCV in performance, in cases where said technique might not be applicable (ie. ordinal data).
+
+
+## Different Scenario
+For this last task, we try to find some change to our data generating process, learner or dataset size that disagrees with the findings about CV, shown above.
+
+Let's consider the following data generating process and perform the same experiment as above on it:
+```{r}
+different_dgp <- function(n, seed = NULL) {
+ set.seed(seed)
+  t
+ x <- matrix(floor(runif(2 * n, 1, 10)), ncol = 2)
+ z <- (-1)^ x[,1]
+ y <- runif(n) > 1 / (1 + exp(-z))
+ return (data.frame(x = x, y = y))
+}
+
+df_dgp_fake <- different_dgp(100000)
+```
+
+```{r, warning = FALSE, echo=FALSE}
+make_df <- function() { data.frame(risk=as.numeric(),
+                                   diff=as.numeric(),
+                                   error=as.numeric(),
+                                   ci=as.numeric(),
+                                   stringsAsFactors = F)
+}
+cv2 <- make_df()
+cv4 <- make_df()
+loocv <- make_df()
+cv10 <- make_df()
+cv10rep <- make_df()
+
+
+for (seed in c(1:500)){
+  toy <- different_dgp(100)
+  h0 <- glm( y ~ ., data = toy, family = binomial)
+  gt <- df_dgp_fake$y
+  pred <- predict(h0, newdata=df_dgp_fake, type='response')
+  trp <- mean(log_loss(gt, pred))
+  sprintf('True risk proxy: %.3f', trp)
+  
+  ##2-fold
+  sprintf('Running 2-fold')
+  shuffled_toy <- toy[sample(nrow(toy)),]
+  splits <- split(shuffled_toy, c(1:2))
+  loss <- c()
+  for (i in c(1:2)){
+    test <- data.frame(splits[i])
+    names(test) <- names(toy)
+    train <- data.frame(splits[-i])
+    names(train) <- names(toy)
+    h <- glm( y ~ ., data = train, family = binomial)
+    pred <- predict(h, newdata=test, type='response')
+    gt <- test$y
+    loss <- append(loss, log_loss(gt, pred))
+  }
+  row <- c()
+  row$risk <- mean(loss)
+  row$diff <- row$risk - trp
+  row$error <- se(loss)
+  row$ci <- inci95(loss, trp)
+  cv2 <- rbind(cv2, row)
+  
+  ###LOOCV
+  shuffled_toy <- toy[sample(nrow(toy)),]
+  splits <- split(shuffled_toy, c(1:length(shuffled_toy)))
+  loss <- c()
+  for (i in c(1:length(shuffled_toy))){
+    test <- data.frame(splits[i])
+    names(test) <- names(toy)
+    train <- make_df()
+    for (df in splits[-i]){
+      df <- data.frame(df)
+      names(df) <- names(toy)
+      train <- rbind(train, df)
+    }
+    h <- glm( y ~ ., data = train, family = binomial)
+    pred <- predict(h, newdata=test, type='response')
+    gt <- test$y
+    loss <- append(loss, log_loss(gt, pred))
+  }
+  row <- c()
+  row$risk <- mean(loss)
+  row$diff <- row$risk - trp
+  row$error <- se(loss)
+  row$ci <- inci95(loss, trp)
+  loocv <- rbind(loocv, row)
+  
+  ### 4-fold CV
+  shuffled_toy <- toy[sample(nrow(toy)),]
+  splits <- split(shuffled_toy, c(1:4))
+  loss <- c()
+  for (i in c(1:4)){
+    test <- data.frame(splits[i])
+    names(test) <- names(toy)
+    train <- make_df()
+    for (df in splits[-i]){
+      df <- data.frame(df)
+      names(df) <- names(toy)
+      train <- rbind(train, df)
+    }
+    h <- glm( y ~ ., data = train, family = binomial)
+    pred <- predict(h, newdata=test, type='response')
+    gt <- test$y
+    loss <- append(loss, log_loss(gt, pred))
+  }
+  row <- c()
+  row$risk <- mean(loss)
+  row$diff <- row$risk - trp
+  row$error <- se(loss)
+  row$ci <- inci95(loss, trp)
+  cv4 <- rbind(cv4, row)
+  
+  ### 10-fold CV
+  shuffled_toy <- toy[sample(nrow(toy)),]
+  f10_temp <- make_df()
+  splits <- split(shuffled_toy, c(1:10))
+  loss <- c()
+  for (i in c(1:10)){
+    test <- data.frame(splits[i])
+    names(test) <- names(toy)
+    train <- make_df()
+    for (df in splits[-i]){
+      df <- data.frame(df)
+      names(df) <- names(toy)
+      train <- rbind(train, df)
+    }
+    h <- glm( y ~ ., data = train, family = binomial)
+    pred <- predict(h, newdata=test, type='response')
+    gt <- test$y
+    loss <- append(loss, log_loss(gt, pred))
+  }
+  row <- c()
+  row$risk <- mean(loss)
+  row$diff <- row$risk - trp
+  row$error <- se(loss)
+  row$ci <- inci95(loss, trp)
+  cv10 <- rbind(cv10, row)
+  
+  ### 10-fold CV with 20 repetitions
+  
+  overall_temp <- make_df()
+  for (repetition in c(1:20)){
+    shuffled_toy <- toy[sample(nrow(toy)),]
+    repetition_temp <- make_df()
+    splits <- split(shuffled_toy, c(1:10))
+    loss <- c()
+    for (i in c(1:10)){
+      row <- c()
+      test <- data.frame(splits[i])
+      names(test) <- names(toy)
+      train <- make_df()
+      for (df in splits[-i]){
+        df <- data.frame(df)
+        names(df) <- names(toy)
+        train <- rbind(train, df)
+      }
+      h <- glm( y ~ ., data = train, family = binomial)
+      pred <- predict(h, newdata=test, type='response')
+      gt <- test$y
+      loss <- append(loss, log_loss(gt, pred))
+    }
+    row <- c()
+    row$risk <- mean(loss)
+    row$diff <- row$risk - trp
+    row$error <- se(loss)
+    row$ci <- inci95(loss, trp)
+    overall_temp <- rbind(overall_temp, row)
+  }
+  row <- c()
+  row$risk <- mean(overall_temp$risk)
+  row$diff <- mean(overall_temp$diff)
+  row$error <- mean(overall_temp$error)
+  row$ci <- mean(overall_temp$ci)
+  cv10rep <- rbind(cv10rep, row)
+  
+}
+```
+
+
+```{r echo=FALSE, warning=FALSE}
+ plot1 <- ggplot(cv2, aes(x=diff)) + geom_density() + ggtitle("2 folds") + xlim(-0.4, 0.6) + theme_bw() + xlab('Diff of empirical and true risk')
+ plot2 <- ggplot(cv4, aes(x=diff)) + geom_density() + ggtitle("4 folds") + xlim(-0.4, 0.6) + theme_bw()+ xlab('Diff of empirical and true risk')
+ plot3 <- ggplot(cv10, aes(x=diff)) + geom_density() + ggtitle("10 folds") + xlim(-0.4, 0.6) + theme_bw()+ xlab('Diff of empirical and true risk')
+ plot4<- ggplot(cv10rep, aes(x=diff)) + geom_density() + ggtitle("10 folds, 20 reps") + theme_bw() + xlim(-0.4, 0.6) + xlab('Diff of empirical and true risk')
+ plot5 <- ggplot(loocv, aes(x=diff)) + geom_density() + ggtitle("loocv") + xlim(-0.4,0.6) + theme_bw()+ xlab('Diff of empirical and true risk')
+ grid.arrange(plot1, plot2, plot3, plot4, plot5, ncol=2)
+
+```
+
+```{r echo=FALSE}
+sprintf("Mean true risk proxy: %.3f", mean(trps))
+sprintf("***MEAN DIFFERENCES - BIAS***")
+sprintf("2-fold: %.3f", mean(cv2$diff))
+sprintf("4-fold: %.3f", mean(cv4$diff))
+sprintf("10-fold: %.3f", mean(cv10$diff))
+sprintf("10-fold, 20 reps: %.3f", mean(cv10rep$diff))
+sprintf("LOOCV: %.3f", mean(loocv$diff))
+sprintf("***MEDIAN STANDARD ERRORS***")
+sprintf("2-fold: %.3f", median(cv2$error))
+sprintf("4-fold: %.3f", median(cv4$error))
+sprintf("10-fold: %.3f", median(cv10$error))
+sprintf("10-fold, 20 reps: %.3f", median(cv10rep$error))
+sprintf("LOOCV: %.3f", median(loocv$error))
+sprintf("***Proportion of time in 95CI***")
+p <- function(inci){
+  return(sum(as.numeric(inci))/length(inci)*100)
+}
+sprintf("2-fold: %.1f%%", p(cv2$ci))
+sprintf("4-fold: %.1f%%", p(cv4$ci))
+sprintf("10-fold: %.1f%%", p(cv10$ci))
+sprintf("10-fold, 20 reps: %.1f%%", p(cv10rep$ci))
+sprintf("LOOCV: %.1f%%", p(loocv$ci))
+```
+```
+
+We notice that, while LOOCV was the densest method around the expected value before , most k-fold cross validation approaches have a smaller variance than it for the considered novel dataset. This is probably due to different training sets in LOOCV having more overlap (due to X.1, X.2 being discrete), consequently resulting in more inter-dependent estimates that might produce the same result.
+
+# Conclusion
+In this homework, we conducted several practical experiments that gave us useful, first hand insight into the actual meaning behind the numbers we often use when evaluating our machine learning models. We learned when methods might over or underestimate the true risk present in our data and reaffirmed some truths that a data scientist should always be aware of when deploying and evaluating a model. The presented empirical results coincide with the literature and the expected results from the homework instructions, while the final task allowed me to think about the properties of Leave-One-Out cross validation on my own, again coming to sensible conclusions that further elevated my level of understanding the subject matter at hand.
