@@ -1,5 +1,5 @@
-# MLDS-homeworks
-This is the private repository of Machine Learning for Data Science homeworks.
+# Machine Learning Implementations
+This repository serves as a showcase of the machine learning approaches studied and implemented as part of the Machine Learning for Data Science course at the Data Science Masters' course at DF@FRI UL.
 All work is my own.
 
 It is advised to look at individual .pdf reports in each folder for better understanding of the provided code.
